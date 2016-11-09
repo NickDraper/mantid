@@ -73,45 +73,45 @@ double MCInteractionVolume::calculateAbsorption(
     Kernel::PseudoRandomNumberGenerator &rng, const Kernel::V3D &startPos,
     const Kernel::V3D &direc, const Kernel::V3D &endPos, double lambdaBefore,
     double lambdaAfter) const {
-  // Create track with start position and direction and "fire" it through
-  // the sample to produce a number of intersections. Choose a random
-  // intersection and within this section pick a random "depth". This point
-  // is the scatter point.
-  // Form a second track originating at the scatter point and ending at endPos
-  // to give a second set of intersections.
-  // The total attenuation factor is the product of the attenuation factor
-  // for each intersection
-
   // Generate scatter point
-  Track path1(startPos, direc);
-  int nsegments = m_sample.interceptSurface(path1);
+  V3D scatterPos = m_sample.generatePointInObject(rng, 500);
+  auto neutronDirec = scatterPos - startPos;
+  neutronDirec.normalize();
+  Track pathBeforeScatter(startPos, neutronDirec);
+  int nlinks = m_sample.interceptSurface(pathBeforeScatter);
   if (m_env) {
-    nsegments += m_env->interceptSurfaces(path1);
+    nlinks += m_env->interceptSurfaces(pathBeforeScatter);
   }
-  if (nsegments == 0) {
+  // This should not happen but numerical precision means that it can
+  // occasionally occur with tracks that are very close to the surface
+  if (nlinks == 0) {
     return -1.0;
   }
-  int scatterSegmentNo(1);
-  if (nsegments != 1) {
-    scatterSegmentNo = rng.nextInt(1, nsegments);
-  }
 
-  double atten(1.0);
-  V3D scatterPos;
-  auto segItr(path1.cbegin());
-  for (int i = 0; i < scatterSegmentNo; ++i, ++segItr) {
-    double length = segItr->distInsideObject;
-    if (i == scatterSegmentNo - 1) {
-      length *= rng.nextValue();
-      scatterPos = segItr->entryPoint + direc * length;
-    }
-    const auto &segObj = *(segItr->object);
-    const auto &segMat = segObj.material();
-    atten *= attenuation(segMat.numberDensity(),
-                         segMat.totalScatterXSection(lambdaBefore) +
-                             segMat.absorbXSection(lambdaBefore),
-                         length);
-  }
+  const auto &link = pathBeforeScatter.front();
+  const double distToScatterPt = scatterPos.distance(link.entryPoint);
+  const auto &mat = link.object->material();
+  double atten =
+      attenuation(mat.numberDensity(), mat.totalScatterXSection(lambdaBefore) +
+                                           mat.absorbXSection(lambdaBefore),
+                  distToScatterPt);
+
+  //  double atten(1.0);
+  //  V3D scatterPos;
+  //  auto segItr(path1.cbegin());
+  //  for (int i = 0; i < scatterSegmentNo; ++i, ++segItr) {
+  //    double length = segItr->distInsideObject;
+  //    if (i == scatterSegmentNo - 1) {
+  //      length *= rng.nextValue();
+  //      scatterPos = segItr->entryPoint + direc * length;
+  //    }
+  //    const auto &segObj = *(segItr->object);
+  //    const auto &segMat = segObj.material();
+  //    atten *= attenuation(segMat.numberDensity(),
+  //                         segMat.totalScatterXSection(lambdaBefore) +
+  //                             segMat.absorbXSection(lambdaBefore),
+  //                         length);
+  //  }
 
   // Now track to final destination
   V3D scatteredDirec = endPos - scatterPos;
@@ -131,7 +131,6 @@ double MCInteractionVolume::calculateAbsorption(
                              segMat.absorbXSection(lambdaAfter),
                          length);
   }
-
   return atten;
 }
 
